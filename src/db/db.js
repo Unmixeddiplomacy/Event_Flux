@@ -10,6 +10,10 @@ if (!process.env.DATABASE_URL) {
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  // Explicitly declare SSL intent to avoid pg driver's sslmode deprecation warning.
+  // 'rejectUnauthorized: false' trusts Neon's certificate (equivalent to sslmode=require).
+  // Change to 'true' if you want strict cert verification (sslmode=verify-full).
+  ssl: { rejectUnauthorized: false },
 });
 
 export const db = drizzle(pool);

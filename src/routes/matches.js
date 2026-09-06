@@ -10,7 +10,7 @@ const maxLimit = 100;
 matchRouter.get("/", async (req, res) => {
     const parsed = listMatchesQuerySchema.safeParse(req.query);
     if (!parsed.success) {
-        res.status(400).json({ error: 'Invalid payload', details: JSON.stringify(parsed.error) });
+        res.status(400).json({ error: 'Invalid payload', details: parsed.error.issues });
         return;
     }
     const limit = Math.min(parsed.data.limit ?? 50, maxLimit);
@@ -30,7 +30,7 @@ matchRouter.get("/", async (req, res) => {
 matchRouter.post("/", async (req, res) => {
     const parsed = createMatchSchema.safeParse(req.body);
     if (!parsed.success) {
-        res.status(400).json({ error: 'Invalid payload', details: parsed.error.flatten() });
+        res.status(400).json({ error: 'Invalid payload', details: parsed.error.issues });
         return;
     }
 
@@ -46,6 +46,10 @@ matchRouter.post("/", async (req, res) => {
             // Fall back to SCHEDULED when startTime/endTime are absent or invalid
             status: getMatchStatus(startTime, endTime) ?? MATCH_STATUS.SCHEDULED,
         }).returning();
+
+        if (res.app.locals.broadcastMatchCreated) {
+            res.app.locals.broadcastMatchCreated(event);
+        }
 
         res.status(201).json({ data: event });
     } catch (e) {

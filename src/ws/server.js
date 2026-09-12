@@ -17,31 +17,48 @@ function broadcast(wss, payload) {
 
 export function attachWebsocketServer(server) {
     const wss = new WebSocketServer({
-        server,
-        path: "/ws",
+        noServer: true,
         maxPayload: 1024 * 1024,
-    })
+    });
 
-    wss.on('connection', async (socket, req) => {
+    server.on('upgrade', async (req, rawSocket, head) => {
+        if (req.url !== '/ws') {
+            rawSocket.destroy();
+            return;
+        }
 
         if (wsArcjet) {
             try {
                 const decision = await wsArcjet.protect(req);
 
                 if (decision.isDenied()) {
-                    const code = decision.reason.isRateLimit() ? 1013 : 1008;
-                    const reason = decision.reason.isRateLimit() ? 'Rate limit exceeded' : 'Access denied';
+                    const isRateLimit = decision.reason.isRateLimit();
+                    const status = isRateLimit ? '429 Too Many Requests' : '403 Forbidden';
+                    const body = isRateLimit ? 'Rate limit exceeded' : 'Access denied';
 
-                    socket.close(code, reason);
+                    rawSocket.write(
+                        `HTTP/1.1 ${status}\r\nContent-Type: text/plain\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`
+                    );
+                    rawSocket.destroy();
                     return;
                 }
             } catch (e) {
-                console.error('WS connection error', e);
-                socket.close(1011, 'Server security error');
+                console.error('WS upgrade security error', e);
+                const body = 'Internal server error';
+                rawSocket.write(
+                    `HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`
+                );
+                rawSocket.destroy();
                 return;
             }
         }
 
+        wss.handleUpgrade(req, rawSocket, head, (ws) => {
+            wss.emit('connection', ws, req);
+        });
+    });
+
+    wss.on('connection', (socket) => {
         socket.isAlive = true;
         socket.on('pong', () => { socket.isAlive = true; });
         sendJson(socket, { type: 'welcome' });

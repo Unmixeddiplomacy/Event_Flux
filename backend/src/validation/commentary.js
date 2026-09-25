@@ -11,10 +11,11 @@ export const listCommentaryQuerySchema = z.object({
 });
 
 export const createCommentarySchema = z.object({
-    minutes: z
+    minute: z
         .number()
         .int()
-        .nonnegative(),
+        .nonnegative()
+        .optional(),
 
     sequence: z
         .number()

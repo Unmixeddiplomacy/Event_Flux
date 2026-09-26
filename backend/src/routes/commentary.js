@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "../db/db.js";
-import { commentary } from "../db/schema.js";
+import { commentary, matches } from "../db/schema.js";
 import { matchIdParamSchema } from "../validation/matches.js";
 import { createCommentarySchema, listCommentaryQuerySchema } from "../validation/commentary.js";
 import { eq, desc } from "drizzle-orm";
@@ -55,6 +55,17 @@ commentaryRouter.post('/', async (req, res) => {
     const { id: matchId } = paramParsed.data;
 
     try {
+        const [targetMatch] = await db.select().from(matches).where(eq(matches.id, matchId)).limit(1);
+        if (!targetMatch) {
+            res.status(404).json({ error: 'Match not found' });
+            return;
+        }
+
+        // Guard 1: Prevent posting commentary to finished matches
+        if (targetMatch.status === 'finished') {
+            res.status(400).json({ error: 'Cannot post commentary: match is finished and locked' });
+            return;
+        }
         const [entry] = await db
             .insert(commentary)
             .values({

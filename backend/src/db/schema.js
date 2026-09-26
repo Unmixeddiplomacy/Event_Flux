@@ -28,6 +28,7 @@ export const matches = pgTable('matches', {
   endTime: timestamp('end_time'),
   homeScore: integer('home_score').notNull().default(0),
   awayScore: integer('away_score').notNull().default(0),
+  source: text('source').default('api'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 

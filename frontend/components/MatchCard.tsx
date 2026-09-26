@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Match } from '../types';
+import { isMyMatch } from '../utils/matchStorage';
 
 interface MatchCardProps {
   match: Match;
@@ -8,14 +9,46 @@ interface MatchCardProps {
   onUnwatch: (id: string | number) => void;
 }
 
+const getSportIcon = (sport?: string) => {
+  switch (sport?.toLowerCase()) {
+    case 'football':
+    case 'soccer':
+      return '⚽';
+    case 'cricket':
+      return '🏏';
+    case 'basketball':
+      return '🏀';
+    case 'tennis':
+      return '🎾';
+    case 'rugby':
+      return '🏉';
+    case 'baseball':
+      return '⚾';
+    default:
+      return '🏆';
+  }
+};
+
 export const MatchCard: React.FC<MatchCardProps> = ({ match, isActive, onWatch, onUnwatch }) => {
   // Handle case-insensitive status check from API
   const statusLower = match.status.toLowerCase();
   const isLive = statusLower === 'live';
   const [homePulse, setHomePulse] = useState(false);
   const [awayPulse, setAwayPulse] = useState(false);
+  const [isOwned, setIsOwned] = useState(() => isMyMatch(match.id));
   const prevScoreRef = useRef({ home: match.homeScore, away: match.awayScore });
   const pulseTimeoutRef = useRef<{ home?: ReturnType<typeof setTimeout>; away?: ReturnType<typeof setTimeout> }>({});
+
+  useEffect(() => {
+    setIsOwned(isMyMatch(match.id));
+    const handleUpdate = () => setIsOwned(isMyMatch(match.id));
+    window.addEventListener('my_studio_matches_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    return () => {
+      window.removeEventListener('my_studio_matches_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, [match.id]);
   
   const actionLabel = (() => {
     if (isLive) {
@@ -72,12 +105,30 @@ export const MatchCard: React.FC<MatchCardProps> = ({ match, isActive, onWatch, 
       relative p-5 rounded-2xl border-2 border-black bg-white transition-all duration-200
       ${isActive ? 'shadow-hard translate-x-[-2px] translate-y-[-2px] ring-2 ring-brand-yellow ring-offset-2' : 'hover:shadow-hard-sm'}
     `}>
-      {/* Header: Sport & Status */}
-      <div className="flex justify-between items-start mb-4">
-        <span className="text-xs font-bold uppercase tracking-wider text-gray-500 border border-black rounded-full px-2 py-0.5">
-          {match.sport}
-        </span>
-        <div className="flex items-center gap-2">
+      {/* Header: Sport, Provenance & Status */}
+      <div className="flex justify-between items-start mb-4 gap-2">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-700 bg-gray-50 border border-black rounded-full px-2.5 py-0.5 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]">
+            <span>{getSportIcon(match.sport)}</span>
+            <span>{match.sport}</span>
+          </span>
+          {match.source === 'studio' ? (
+            <span className="text-[10px] font-bold uppercase tracking-wider text-purple-900 bg-purple-100 border border-black rounded-full px-2 py-0.5 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]">
+              🎙️ Studio Match
+            </span>
+          ) : (
+            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-900 bg-blue-50 border border-black rounded-full px-2 py-0.5 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]">
+              🌐 Official API
+            </span>
+          )}
+          {isOwned && (
+            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-900 bg-amber-100 border border-black rounded-full px-2 py-0.5 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] flex items-center gap-1">
+              <span>👑</span>
+              <span>Your Match</span>
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
           {isLive && (
             <span className="flex h-3 w-3 relative">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>

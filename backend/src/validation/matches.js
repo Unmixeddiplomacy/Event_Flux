@@ -64,6 +64,7 @@ export const createMatchSchema = z
       .optional(),
     homeScore: z.coerce.number().int().nonnegative().optional(),
     awayScore: z.coerce.number().int().nonnegative().optional(),
+    source: z.string().trim().optional().default('api'),
   })
   .superRefine((data, ctx) => {
     if (data.startTime && data.endTime) {

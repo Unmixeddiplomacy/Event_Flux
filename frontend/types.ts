@@ -8,6 +8,7 @@ export interface Match {
   endTime?: string;
   homeScore: number;
   awayScore: number;
+  source?: string;
   createdAt?: string;
 }
 
@@ -48,6 +49,7 @@ export interface WSMessageScore {
   data: {
     homeScore: number;
     awayScore: number;
+    status?: string;
   };
 }
 
@@ -100,3 +102,31 @@ export type WSMessage =
   | WSMessageSubscriptions
   | WSMessageSubscribedAll
   | WSMessageUnsubscribedAll;
+
+export interface CreateMatchPayload {
+  sport: string;
+  homeTeam: string;
+  awayTeam: string;
+  startTime?: string;
+  endTime?: string;
+  homeScore?: number;
+  awayScore?: number;
+  source?: string;
+}
+
+export interface CreateCommentaryPayload {
+  message: string;
+  minute?: number;
+  period?: string;
+  eventType?: string;
+  actor?: string;
+  team?: string;
+  tags?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpdateScorePayload {
+  homeScore: number;
+  awayScore: number;
+}
+

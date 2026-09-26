@@ -4,22 +4,24 @@ import { wsArcjet } from "../arcjet.js";
 const matchSubscribers = new Map();
 
 function subscribe(matchId, socket) {
-    if (!matchSubscribers.has(matchId)) {
-        matchSubscribers.set(matchId, new Set());
+    const key = Number(matchId);
+    if (!matchSubscribers.has(key)) {
+        matchSubscribers.set(key, new Set());
     }
 
-    matchSubscribers.get(matchId).add(socket);
+    matchSubscribers.get(key).add(socket);
 }
 
 function unsubscribe(matchId, socket) {
-    const subscribers = matchSubscribers.get(matchId);
+    const key = Number(matchId);
+    const subscribers = matchSubscribers.get(key);
 
     if (!subscribers) return;
 
     subscribers.delete(socket);
 
     if (subscribers.size === 0) {
-        matchSubscribers.delete(matchId);
+        matchSubscribers.delete(key);
     }
 }
 
@@ -31,7 +33,8 @@ function cleanupSubscription(socket) {
 }
 
 function broadcastToMatch(matchId, payload) {
-    const subscribers = matchSubscribers.get(matchId);
+    const key = Number(matchId);
+    const subscribers = matchSubscribers.get(key);
     if (!subscribers || subscribers.size === 0) return;
 
     const message = JSON.stringify(payload);
@@ -145,12 +148,12 @@ export function attachWebsocketServer(server) {
     });
 
     const interval = setInterval(() => {
-        wss.clients.forEach((ws) => {
-            if (ws.isAlive = false) return ws.terminate();
+        wss.clients.forEach((socket) => {
+            if (socket.isAlive === false) return socket.terminate();
 
-            ws.isAlive = false;
-            ws.ping();
-        })
+            socket.isAlive = false;
+            socket.ping();
+        });
     }, 30000);
 
     wss.on('close', () => clearInterval(interval));
@@ -161,5 +164,8 @@ export function attachWebsocketServer(server) {
     function broadcastCommentary(matchId, comment) {
         broadcastToMatch(matchId, { type: 'commentary', data: comment });
     }
-    return { broadcastMatchCreated, broadcastCommentary }
+    function broadcastScoreUpdate(matchId, scoreData) {
+        broadcastToAll(wss, { type: 'score_update', matchId, data: scoreData });
+    }
+    return { broadcastMatchCreated, broadcastCommentary, broadcastScoreUpdate }
 }

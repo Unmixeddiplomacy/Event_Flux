@@ -10,16 +10,24 @@ interface UseWebSocketReturn {
   disconnect: () => void;
 }
 
+const MAX_RECONNECT_ATTEMPTS = 8;
+
 export const useWebSocket = (
   onMessage: (msg: WSMessage) => void
 ): UseWebSocketReturn => {
-  const [status, setStatus] = useState<ConnectionStatus>('disconnected');
-  
+  const [status, setStatus] = useState<ConnectionStatus>('connecting');
+
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttempts = useRef(0);
   const isIntentionalClose = useRef(false);
   const subscribedMatchIdsRef = useRef(new Set<string>());
+
+  // Keep latest onMessage callback in a ref to keep initConnection stable
+  const onMessageRef = useRef(onMessage);
+  useEffect(() => {
+    onMessageRef.current = onMessage;
+  }, [onMessage]);
 
   const normalizeId = (matchId: string | number) => String(matchId);
 
@@ -29,131 +37,165 @@ export const useWebSocket = (
     }
   }, []);
 
-  // Core connect function
+  // Core connect function - stable with zero external dependencies
   const initConnection = useCallback(() => {
-    // Cleanup previous connection
-    if (ws.current) {
-      isIntentionalClose.current = true;
-      ws.current.close();
+    // If already open or actively connecting, do not re-create
+    if (
+      ws.current &&
+      (ws.current.readyState === WebSocket.OPEN ||
+        ws.current.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
     }
 
-    setStatus(reconnectAttempts.current > 0 ? 'reconnecting' : 'connecting');
+    // Clean up any existing socket before opening a new one
+    if (ws.current) {
+      const old = ws.current;
+      old.onopen = null;
+      old.onmessage = null;
+      old.onerror = null;
+      old.onclose = null;
+      try {
+        old.close();
+      } catch {}
+      ws.current = null;
+    }
+
     isIntentionalClose.current = false;
 
-    // Construct URL
-    const socketUrl = WS_BASE_URL;
-    
     try {
-      const socket = new WebSocket(socketUrl);
+      const socket = new WebSocket(WS_BASE_URL);
       ws.current = socket;
 
       socket.onopen = () => {
+        if (socket !== ws.current) return;
         setStatus('connected');
         reconnectAttempts.current = 0;
-        // Re-subscribe to all previously watched matches after reconnect
-        // using individual 'subscribe' messages (the only type the server handles)
+
+        // Re-subscribe to all active matches post-reconnect
         if (subscribedMatchIdsRef.current.size > 0) {
           subscribedMatchIdsRef.current.forEach((matchId) => {
-            socket.send(JSON.stringify({ type: 'subscribe', matchId: Number(matchId) }));
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({ type: 'subscribe', matchId: Number(matchId) }));
+            }
           });
         }
-        console.log('[WebSocket] Connected successfully');
       };
 
       socket.onmessage = (event) => {
+        if (socket !== ws.current) return;
         try {
           const data = JSON.parse(event.data);
-          onMessage(data);
+          onMessageRef.current(data);
         } catch (e) {
           console.error('[WebSocket] Failed to parse message:', e);
         }
       };
 
-      socket.onerror = (event) => {
-        // WebSocket error events are generic in browsers and don't contain descriptive messages.
-        // We log it to indicate an issue occurred.
-        console.warn('[WebSocket] Connection error occurred');
-        
-        // Only set error status if we were connected; otherwise let onclose handle it
-        if (ws.current?.readyState === WebSocket.OPEN) {
-             setStatus('error');
+      socket.onerror = () => {
+        if (socket !== ws.current) return;
+        // Keep status in 'reconnecting' rather than flickering to 'error'
+        // unless we have exceeded maximum reconnect attempts
+        if (reconnectAttempts.current >= MAX_RECONNECT_ATTEMPTS) {
+          setStatus('error');
         }
       };
 
-      socket.onclose = (event) => {
+      socket.onclose = () => {
+        if (socket !== ws.current) return;
         if (!isIntentionalClose.current) {
-          setStatus('disconnected');
-          
-          // Exponential backoff for real reconnection attempts
-          const delay = Math.min(
-            INITIAL_RECONNECT_DELAY * (2 ** reconnectAttempts.current),
-            MAX_RECONNECT_DELAY
-          );
-          
-          console.log(`[WebSocket] Disconnected (Code: ${event.code}). Reconnecting in ${delay}ms...`);
-          
-          reconnectTimeout.current = setTimeout(() => {
-            reconnectAttempts.current += 1;
-            initConnection();
-          }, delay);
-        } else {
-            // If closed intentionally, just set status
+          // Transition to 'reconnecting', NOT 'disconnected' (Offline)
+          // to eliminate visual flicker on transient reconnections.
+          if (reconnectAttempts.current < MAX_RECONNECT_ATTEMPTS) {
+            setStatus('reconnecting');
+
+            const delay = Math.min(
+              INITIAL_RECONNECT_DELAY * (2 ** reconnectAttempts.current),
+              MAX_RECONNECT_DELAY
+            );
+
+            reconnectTimeout.current = setTimeout(() => {
+              reconnectAttempts.current += 1;
+              initConnection();
+            }, delay);
+          } else {
+            // Only show offline if all reconnect attempts are exhausted
             setStatus('disconnected');
+          }
+        } else {
+          setStatus('disconnected');
         }
       };
-
     } catch (e) {
-      console.error('[WebSocket] Connection creation failed:', e);
+      console.error('[WebSocket] Socket creation failed:', e);
       setStatus('error');
     }
-  }, [onMessage]);
+  }, []);
 
-  // Public connect method
   const connectGlobal = useCallback(() => {
-    if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
-    reconnectAttempts.current = 0;
-    if (ws.current && (ws.current.readyState === WebSocket.OPEN || ws.current.readyState === WebSocket.CONNECTING)) {
-      return;
-    }
     initConnection();
   }, [initConnection]);
 
-  const subscribeMatch = useCallback((matchId: string | number) => {
-    const normalized = normalizeId(matchId);
-    subscribedMatchIdsRef.current.add(normalized);
-    sendMessage({ type: 'subscribe', matchId });
-  }, [sendMessage]);
+  const subscribeMatch = useCallback(
+    (matchId: string | number) => {
+      const normalized = normalizeId(matchId);
+      subscribedMatchIdsRef.current.add(normalized);
+      sendMessage({ type: 'subscribe', matchId: Number(matchId) });
+    },
+    [sendMessage]
+  );
 
-  const unsubscribeMatch = useCallback((matchId: string | number) => {
-    const normalized = normalizeId(matchId);
-    subscribedMatchIdsRef.current.delete(normalized);
-    sendMessage({ type: 'unsubscribe', matchId });
-  }, [sendMessage]);
+  const unsubscribeMatch = useCallback(
+    (matchId: string | number) => {
+      const normalized = normalizeId(matchId);
+      subscribedMatchIdsRef.current.delete(normalized);
+      sendMessage({ type: 'unsubscribe', matchId: Number(matchId) });
+    },
+    [sendMessage]
+  );
 
-  // Public disconnect method
   const disconnect = useCallback(() => {
     isIntentionalClose.current = true;
-    
-    if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
-    
+    if (reconnectTimeout.current) {
+      clearTimeout(reconnectTimeout.current);
+      reconnectTimeout.current = null;
+    }
+
     if (ws.current) {
-      ws.current.close();
+      const s = ws.current;
+      s.onopen = null;
+      s.onmessage = null;
+      s.onerror = null;
+      s.onclose = null;
+      try {
+        s.close();
+      } catch {}
       ws.current = null;
     }
-    
     setStatus('disconnected');
   }, []);
 
-  // Cleanup on unmount
   useEffect(() => {
+    initConnection();
     return () => {
       isIntentionalClose.current = true;
-      if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
+      if (reconnectTimeout.current) {
+        clearTimeout(reconnectTimeout.current);
+        reconnectTimeout.current = null;
+      }
       if (ws.current) {
-        ws.current.close();
+        const s = ws.current;
+        s.onopen = null;
+        s.onmessage = null;
+        s.onerror = null;
+        s.onclose = null;
+        try {
+          s.close();
+        } catch {}
+        ws.current = null;
       }
     };
-  }, []);
+  }, [initConnection]);
 
   return { status, connectGlobal, subscribeMatch, unsubscribeMatch, disconnect };
 };

@@ -17,6 +17,7 @@ interface UseMatchData {
   watchMatch: (id: string | number) => void;
   unwatchMatch: (id: string | number) => void;
   reloadMatches: () => void;
+  updateMatchLocally: (updated: Match) => void;
 }
 
 export const useMatchData = (): UseMatchData => {
@@ -37,10 +38,7 @@ export const useMatchData = (): UseMatchData => {
   const handleWSMessage = useCallback((msg: WSMessage) => {
     switch (msg.type) {
       case "score_update": {
-        if (!subscribedMatchIdsRef.current.has(String(msg.matchId))) {
-          return;
-        }
-        const { homeScore, awayScore } = msg.data as { homeScore: number; awayScore: number };
+        const scoreData = msg.data as { homeScore: number; awayScore: number; status?: string };
         setMatches((prevMatches) =>
           prevMatches.map((m) => {
             // Loose equality check for ID (string vs number)
@@ -48,8 +46,9 @@ export const useMatchData = (): UseMatchData => {
             if (m.id == msg.matchId) {
               return {
                 ...m,
-                homeScore,
-                awayScore,
+                homeScore: scoreData.homeScore,
+                awayScore: scoreData.awayScore,
+                ...(scoreData.status ? { status: scoreData.status } : {}),
               };
             }
             return m;
@@ -145,12 +144,7 @@ export const useMatchData = (): UseMatchData => {
         if (subscribedMatchIdsRef.current.has(matchId) && match.status.toLowerCase() === "finished") {
           subscribedMatchIdsRef.current.delete(matchId);
           unsubscribeMatch(match.id);
-          if (latestMatchIdRef.current == match.id) {
-            setActiveMatchId(null);
-            latestMatchIdRef.current = null;
-            setCommentary([]);
-            setIsCommentaryLoading(false);
-          }
+          // Keep activeMatchId and commentary loaded so the user can continue viewing the recap!
         }
       });
     } catch (err) {
@@ -175,9 +169,6 @@ export const useMatchData = (): UseMatchData => {
     return () => clearInterval(interval);
   }, [loadMatches]);
 
-  useEffect(() => {
-    connectGlobal();
-  }, [connectGlobal]);
 
   useEffect(() => {
     latestMatchIdRef.current = activeMatchId;
@@ -249,6 +240,12 @@ export const useMatchData = (): UseMatchData => {
     [activeMatchId, unsubscribeMatch]
   );
 
+  const updateMatchLocally = useCallback((updated: Match) => {
+    setMatches((prev) =>
+      prev.map((m) => (String(m.id) === String(updated.id) ? { ...m, ...updated } : m))
+    );
+  }, []);
+
   return {
     matches,
     isLoading,
@@ -263,5 +260,6 @@ export const useMatchData = (): UseMatchData => {
     watchMatch,
     unwatchMatch,
     reloadMatches: loadMatches,
+    updateMatchLocally,
   };
 };

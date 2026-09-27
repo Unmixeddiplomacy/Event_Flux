@@ -2,7 +2,12 @@
   "name": "event-flux",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
+  "main": "backend/src/index.js",
   "scripts": {
+    "start": "npm start --prefix backend",
+    "build": "npm install --prefix backend",
+    "postinstall": "npm install --prefix backend",
     "dev": "concurrently -n BACKEND,FRONTEND -c blue,green \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "npm run dev --prefix backend",
     "dev:frontend": "npm run dev --prefix frontend",
@@ -12,3 +17,4 @@
     "concurrently": "^9.1.2"
   }
 }
+
